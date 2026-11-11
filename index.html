@@ -1,5 +1,5 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Quarter Hours Tracker v2.2 — Registration Testing Preview — Live Read-only Guest Preview</title>
+<title>Quarter Hours Tracker v2.2 — Overtime Entry Preview — v2.2</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#eef2f6;color:#18212b;font-family:Arial,sans-serif}
 header{position:relative;background:linear-gradient(135deg,#17212b,#31556f);color:white;text-align:center;padding:25px 15px}
@@ -62,7 +62,7 @@ button{border:0;border-radius:8px;padding:11px 16px;font-weight:700;cursor:point
 <button class="primary full" onclick="submitLocation('w17')">Submit Hours + PTO</button>
 <button class="danger full" onclick="clearSelected('w17')">Clear Selected Period</button>
 </div></div>
-<div class="notice"><b>Tracking only:</b> 75 weekly, 150 biweekly, and 975 quarterly. Entries are never rejected for going over. Assistant PTO is deducted from regular hours counted.</div>
+<div class="notice"><b>Tracking only:</b> 75 weekly ($1,125 at $15/hr), 150 biweekly ($2,250 at $15/hr), and 975 quarterly ($14,625 at $15/hr). Entries are never rejected for going over. Assistant PTO is deducted from regular hours counted. Any overtime hours entered are deducted from the quarter's remaining bonus dollar amount at $22.50 per hour.</div>
 <div id="w17stats"></div><div id="w17log"></div>
 </section>
 
@@ -76,7 +76,7 @@ button{border:0;border-radius:8px;padding:11px 16px;font-weight:700;cursor:point
 <button class="primary full" onclick="submitLocation('w39')">Submit Hours + PTO</button>
 <button class="danger full" onclick="clearSelected('w39')">Clear Selected Period</button>
 </div></div>
-<div class="notice"><b>Tracking only:</b> 75 weekly, 150 biweekly, and 975 quarterly. Entries are never rejected for going over. Assistant PTO is deducted from regular hours counted.</div>
+<div class="notice"><b>Tracking only:</b> 75 weekly ($1,125 at $15/hr), 150 biweekly ($2,250 at $15/hr), and 975 quarterly ($14,625 at $15/hr). Entries are never rejected for going over. Assistant PTO is deducted from regular hours counted. Any overtime hours entered are deducted from the quarter's remaining bonus dollar amount at $22.50 per hour.</div>
 <div id="w39stats"></div><div id="w39log"></div>
 </section>
 <section id="personal" class="panel"><h2>Personal Hours — ${esc(getRegistration()?.adminName||'Administrator')}</h2><div class="card"><label>Pay Period</label><select id="personalperiod"></select></div><div class="card"><div class="notice">Personal target: <b>585 hours</b>. Password 4187 is required to add or clear entries.</div>
@@ -700,7 +700,7 @@ function regLocs(){const r=getRegistration();return r&&Array.isArray(r.locations
 function locKey(i){return 'location_'+(i+1);}
 function ensureDynamicState(){
   const locs=regLocs();
-  state=state||blankState(); state.locations=state.locations||{}; state.adminHours=state.adminHours||{}; state.pto=state.pto||{};
+  state=state||blankState(); state.locations=state.locations||{}; state.adminHours=state.adminHours||{}; state.pto=state.pto||{}; state.overtime=state.overtime||{};
   locs.forEach((loc,i)=>{const k=locKey(i); if(!Array.isArray(state.locations[k])) state.locations[k]=[]; if(!Array.isArray(state.adminHours)) state.adminHours={}; if(!Array.isArray(state.adminHours[k])) state.adminHours[k]=[]; if(!Array.isArray(state.pto[k])) state.pto[k]=Array.from({length:(loc.ptoEmployees||[]).length},()=>[]);});
   // Dynamic location data is authoritative. Do not repopulate a cleared
   // location from the legacy W17/W39 aliases. That caused cleared entries
@@ -746,7 +746,11 @@ function buildDynamicPanels(){
       <h3>PTO Hours</h3><div id="${id}ptoRows"></div>
       <button class="primary full" onclick="submitDynamicLocation('${k}',${i})">Submit Hours + PTO</button>
       <button class="danger full" onclick="clearDynamicLocation('${k}',${i})">Clear Selected Period</button></div></div>
-      <div class="notice"><b>Tracking only:</b> ${fmt(readLimitValue(loc.weeklyLimit,75))} weekly, ${fmt(readLimitValue(loc.biweeklyLimit,150))} biweekly, and ${fmt(readLimitValue(loc.quarterlyLimit,975))} quarterly. Entries are never rejected for going over. Assistant PTO is deducted from regular hours counted.</div>
+      <div class="card overtime-card"><label>Overtime hours <span style="color:#b42318;font-size:12px;font-weight:600">(not allowed but just in case)</span></label>
+      <input id="${id}overtime" type="number" min="0" step="any" placeholder="Enter overtime hours">
+      <button class="secondary full" onclick="submitDynamicOvertime('${k}',${i})">Submit Overtime Hours</button>
+      <small>Overtime is calculated at $22.50 per hour and deducted from the quarter's remaining bonus dollar amount. It is not added to regular hours or location logs.</small></div>
+      <div class="notice"><b>Tracking only:</b> ${fmt(readLimitValue(loc.weeklyLimit,75))} weekly ($${fmt(readLimitValue(loc.weeklyLimit,75)*RATE)} at $15/hr), ${fmt(readLimitValue(loc.biweeklyLimit,150))} biweekly ($${fmt(readLimitValue(loc.biweeklyLimit,150)*RATE)} at $15/hr), and ${fmt(readLimitValue(loc.quarterlyLimit,975))} quarterly ($${fmt(readLimitValue(loc.quarterlyLimit,975)*RATE)} at $15/hr). Entries are never rejected for going over. Assistant PTO is deducted from regular hours counted. Any overtime hours entered are deducted from the quarter's remaining bonus dollar amount at $22.50 per hour.</div>
       <div id="${id}stats"></div><div id="${id}log"></div>`;
     main.appendChild(sec);
     const rows=sec.querySelector('#'+id+'ptoRows');
@@ -1081,6 +1085,20 @@ async function submitDynamicLocation(k,i){
  document.getElementById('loc_'+(i+1)+'hours').value='';people.forEach((_,j)=>document.getElementById('loc_'+(i+1)+'pto_'+j).value='');saveDynamic();
 }
 
+async function submitDynamicOvertime(k,i){
+ if(!(await auth())){ alert('Incorrect password. No overtime was added.'); return; }
+ const id='loc_'+(i+1),period=document.getElementById(id+'period')?.value;
+ const input=document.getElementById(id+'overtime');
+ const hours=Number(input?.value);
+ if(!period){ alert('Select a pay period first.'); return; }
+ if(!Number.isFinite(hours)||hours<=0){ alert('Enter overtime hours greater than zero.'); return; }
+ state.overtime=state.overtime||{};
+ state.overtime[k]=Array.isArray(state.overtime[k])?state.overtime[k]:[];
+ state.overtime[k].push({id:crypto.randomUUID(),period,hours,date:new Date().toLocaleString(),type:'Overtime'});
+ input.value='';
+ saveDynamic();
+}
+
 async function clearDynamicLocation(k,i){
   if(!(await auth())){ alert('Incorrect password. Entry was not cleared.'); return; }
   const sel=document.getElementById('loc_'+(i+1)+'period');
@@ -1091,12 +1109,15 @@ async function clearDynamicLocation(k,i){
   const beforePto=(Array.isArray(state.pto[k])?state.pto[k]:[]).reduce((n,a)=>n+(Array.isArray(a)?a.length:0),0);
   state.locations[k]=(Array.isArray(state.locations[k])?state.locations[k]:[]).filter(e=>String(e.period||'').trim()!==p);
   state.pto[k]=(Array.isArray(state.pto[k])?state.pto[k]:[]).map(a=>(Array.isArray(a)?a:[]).filter(e=>String(e.period||'').trim()!==p));
+  state.overtime=state.overtime||{};
+  const overtimeBefore=(Array.isArray(state.overtime[k])?state.overtime[k]:[]).length;
+  state.overtime[k]=(Array.isArray(state.overtime[k])?state.overtime[k]:[]).filter(e=>String(e.period||'').trim()!==p);
   // Keep the legacy aliases synchronized AFTER clearing so ensureDynamicState
   // cannot restore the old entries from the stale W17/W39 aliases.
   if(!state.pto) state.pto={};
   if(k==='location_1'){ state.w17=state.locations[k]; state.pto.w17=state.pto[k]; }
   if(k==='location_2'){ state.w39=state.locations[k]; state.pto.w39=state.pto[k]; }
-  const cleared=(beforeRegular-(state.locations[k]||[]).length)+(beforePto-(state.pto[k]||[]).reduce((n,a)=>n+(Array.isArray(a)?a.length:0),0));
+  const cleared=(beforeRegular-(state.locations[k]||[]).length)+(beforePto-(state.pto[k]||[]).reduce((n,a)=>n+(Array.isArray(a)?a.length:0),0))+(overtimeBefore-(state.overtime[k]||[]).length);
   persistQuarters();
   renderDynamic();
   alert(cleared ? 'Selected period cleared.' : 'No entries were found for the selected period.');
@@ -1114,7 +1135,7 @@ function renderDynamic(){
  ensureDynamicState();
  normalizeAdminPtoSlots();
  regLocs().forEach((loc,i)=>{const k=locKey(i),id='loc_'+(i+1),arr=state.locations[k]||[],admins=state.adminHours[k]||[],ptos=state.pto[k]||[],regularTotal=total(arr),adminTotal=total(admins),ptoTotal=ptos.reduce((s,a)=>s+total(a||[]),0),counted=regularTotal-ptoTotal,p= document.getElementById(id+'period')?.value||'';
-  const c=p?dynamicCalc(k,p):{rh:0,ph:0,counted:0}; const overtimeTotal=total((state.overtime?.[k]||[])); const quarterLimit=readLimitValue(loc.quarterlyLimit,975); const remain=quarterLimit-counted; const stats=document.getElementById(id+'stats');if(stats)stats.innerHTML=`<div class="stats"><div class="stat">How Well I Am Doing for the Quarter<b>${locationQuarterStatus(k,loc,counted)}</b></div><div class="stat">Weekly allowance<b>75 hrs = $1,125</b></div><div class="stat">Biweekly allowance<b>150 hrs = $2,250</b></div><div class="stat">Quarter allowance<b>${fmt(quarterLimit)} hrs = $${fmt(quarterLimit*RATE)}</b></div><div class="stat">Regular input<b>${fmt(regularTotal)} hrs = $${fmt(regularTotal*RATE)}</b></div><div class="stat">Assistant PTO deducted<b>${fmt(ptoTotal)} hrs = $${fmt(ptoTotal*RATE)}</b></div><div class="stat">Regular hours counted after PTO<b>${fmt(counted)} hrs = $${fmt(counted*RATE)}</b></div><div class="stat">Overtime hours (time-and-a-half: $22.50/hr)<b>${fmt(overtimeTotal)} hrs = $${fmt(overtimeTotal*OT_RATE)}</b></div><div class="stat">Quarter remaining<b>${fmt(remain)} hrs</b><span class="money"><strong>Bonus Amount:</strong> (${fmt(remain)} X $15) - Overtime ($${fmt(overtimeTotal*OT_RATE)}) = $${fmt(remain*RATE-overtimeTotal*OT_RATE)}</span></div></div>`;
+  const c=p?dynamicCalc(k,p):{rh:0,ph:0,counted:0}; const overtimeTotal=total((state.overtime?.[k]||[])); const quarterLimit=readLimitValue(loc.quarterlyLimit,975); const remain=quarterLimit-counted; const stats=document.getElementById(id+'stats');if(stats)stats.innerHTML=`<div class="stats"><div class="stat">How Well I Am Doing for the Quarter<b>${locationQuarterStatus(k,loc,counted)}</b></div><div class="stat">Weekly allowance<b>75 hrs = $1,125</b></div><div class="stat">Biweekly allowance<b>150 hrs = $2,250</b></div><div class="stat">Quarter allowance<b>${fmt(quarterLimit)} hrs = $${fmt(quarterLimit*RATE)}</b></div><div class="stat">Regular input<b>${fmt(regularTotal)} hrs = $${fmt(regularTotal*RATE)}</b></div><div class="stat">Assistant PTO deducted<b>${fmt(ptoTotal)} hrs = $${fmt(ptoTotal*RATE)}</b></div><div class="stat">Regular hours counted after PTO<b>${fmt(counted)} hrs = $${fmt(counted*RATE)}</b></div><div class="stat">Overtime hours (not allowed but just in case) — $22.50/hr<b>${fmt(overtimeTotal)} hrs = $${fmt(overtimeTotal*OT_RATE)}</b></div><div class="stat">Quarter remaining<b>${fmt(remain)} hrs</b><span class="money"><strong>Bonus Amount:</strong> (${fmt(remain)} X $15) - Overtime ($${fmt(overtimeTotal*OT_RATE)}) = $${fmt(remain*RATE-overtimeTotal*OT_RATE)}</span></div></div>`;
   const log=document.getElementById(id+'log');if(log)log.innerHTML=locationCombinedLog(k,i);
  });
  const pt=total(state.personal||[]),pp=total(state.personalPTO||[]),counted=pt+pp,r=readLimitValue(getRegistration()?.personalQuarterHours,585)-counted;const personalPeriods=[...new Set([...(state.personal||[]),...(state.personalPTO||[])].map(e=>e.period))];const qPeriods=(QUARTERS[activeQuarter]?.personal||[]);const latestIndex=personalPeriods.reduce((m,p)=>Math.max(m,qPeriods.indexOf(p)), -1);const personalAllowed=latestIndex<0?0:personalQuarterAllowanceThrough(qPeriods[latestIndex]);const personalQuarterStatus=counted<personalAllowed?statusTag('UNDER by '+fmt(personalAllowed-counted),true):counted>personalAllowed?statusTag('OVER by '+fmt(counted-personalAllowed),false):statusTag('MET',false);const ps=document.getElementById('personalStats');if(ps)ps.innerHTML=`<div class="stats"><div class="stat">How Well I Am Doing for the Quarter<b>${personalQuarterStatus}</b></div><div class="stat">Week 1 allowance<b>45 hrs</b></div><div class="stat">Biweekly allowance<b>90 hrs</b></div><div class="stat">Quarter allowance<b>${fmt(readLimitValue(getRegistration()?.personalQuarterHours,585))} hrs</b></div><div class="stat">Regular input<b>${fmt(pt)} hrs</b></div><div class="stat">PTO<b>${fmt(pp)} hrs</b></div><div class="stat">Hours counted<b>${fmt(counted)} hrs</b></div><div class="stat">Hours remaining<b>${fmt(r)} hrs</b></div></div>`;
